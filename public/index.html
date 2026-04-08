@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sequoia Audit</title>
+    <meta
+      name="description"
+      content="Open-source AI-assisted website auditor for agencies, freelancers, and product teams."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+
+    <main class="shell">
+      <section class="hero card">
+        <div class="eyebrow">Open-source website auditor</div>
+        <h1>Audit websites with real signals first, AI second.</h1>
+        <p class="hero-copy">
+          Sequoia Audit crawls a public website, scores the biggest quality gaps, and optionally adds an AI-written
+          executive summary for founders, marketers, and agencies.
+        </p>
+
+        <form id="audit-form" class="audit-form">
+          <label class="field">
+            <span>Website URL</span>
+            <input
+              id="url"
+              name="url"
+              type="url"
+              placeholder="https://example.com"
+              value="https://example.com"
+              required
+            />
+          </label>
+
+          <label class="field field-small">
+            <span>Max pages</span>
+            <select id="maxPages" name="maxPages">
+              <option value="2">2</option>
+              <option value="4" selected>4</option>
+              <option value="6">6</option>
+              <option value="8">8</option>
+            </select>
+          </label>
+
+          <button id="submit-button" class="primary-button" type="submit">Run audit</button>
+        </form>
+
+        <div class="pill-row">
+          <span class="pill">Technical</span>
+          <span class="pill">SEO</span>
+          <span class="pill">Accessibility</span>
+          <span class="pill">Conversion</span>
+          <span class="pill">Trust</span>
+          <span class="pill">Optional AI summary</span>
+        </div>
+      </section>
+
+      <section class="overview-grid">
+        <article class="card">
+          <h2>Made for open-source credibility</h2>
+          <p>Ships with a CLI, JSON output, and a small TypeScript codebase that is easy to extend.</p>
+        </article>
+        <article class="card">
+          <h2>Useful as a funnel</h2>
+          <p>Surface quick wins instantly, then layer on booking, export, CRM, or email capture later.</p>
+        </article>
+        <article class="card">
+          <h2>Grounded output</h2>
+          <p>Scores come from deterministic checks. AI is only used to synthesize and prioritize.</p>
+        </article>
+      </section>
+
+      <section id="status-panel" class="status-panel hidden">
+        <div class="card status-card">
+          <div id="status-text">Running audit...</div>
+          <div class="progress-track">
+            <div class="progress-bar"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="error-panel" class="hidden">
+        <div class="card error-card" id="error-text"></div>
+      </section>
+
+      <section id="results" class="results hidden">
+        <div class="summary-grid">
+          <article class="card score-card">
+            <div class="score-label">Overall score</div>
+            <div id="overall-score" class="score-value">0</div>
+            <div id="overall-site" class="score-site"></div>
+          </article>
+          <article class="card score-card">
+            <div class="score-label">Pages crawled</div>
+            <div id="page-count" class="metric-value">0</div>
+            <div id="audit-time" class="metric-note"></div>
+          </article>
+          <article class="card score-card">
+            <div class="score-label">Average response</div>
+            <div id="response-time" class="metric-value">0ms</div>
+            <div class="metric-note">Document response proxy, not full CWV.</div>
+          </article>
+        </div>
+
+        <section class="card">
+          <div class="section-head">
+            <h2>Category scores</h2>
+          </div>
+          <div id="category-grid" class="category-grid"></div>
+        </section>
+
+        <section id="ai-summary-card" class="card hidden">
+          <div class="section-head">
+            <h2>AI summary</h2>
+            <span class="section-note">Rendered only when OpenAI is configured.</span>
+          </div>
+          <div id="ai-summary"></div>
+        </section>
+
+        <section class="issue-layout">
+          <article class="card">
+            <div class="section-head">
+              <h2>Top issues</h2>
+            </div>
+            <div id="issues-list" class="stack"></div>
+          </article>
+
+          <article class="card">
+            <div class="section-head">
+              <h2>What is already working</h2>
+            </div>
+            <ul id="wins-list" class="wins-list"></ul>
+          </article>
+        </section>
+
+        <section class="card">
+          <div class="section-head">
+            <h2>Pages audited</h2>
+          </div>
+          <div id="pages-grid" class="pages-grid"></div>
+        </section>
+      </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+  </html>

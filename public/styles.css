@@ -109,7 +109,7 @@ h3,
 
 .audit-form {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 150px minmax(240px, 280px) auto;
+  grid-template-columns: minmax(0, 1fr) 150px minmax(220px, 260px) minmax(220px, 260px) auto;
   gap: 1rem;
   margin-top: 2rem;
 }
@@ -194,6 +194,20 @@ select:focus {
   cursor: wait;
 }
 
+.secondary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  padding: 0.8rem 1rem;
+  border-radius: 0.95rem;
+  border: 1px solid rgba(157, 182, 187, 0.18);
+  background: rgba(4, 12, 17, 0.78);
+  color: var(--text);
+  text-decoration: none;
+  cursor: pointer;
+}
+
 .pill-row {
   display: flex;
   flex-wrap: wrap;
@@ -212,7 +226,9 @@ select:focus {
 
 .overview-grid,
 .summary-grid,
-.issue-layout {
+.issue-layout,
+.share-grid,
+.lead-form {
   display: grid;
   gap: 1rem;
   margin-top: 1rem;
@@ -281,6 +297,24 @@ select:focus {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.share-grid {
+  grid-template-columns: 1fr auto;
+  align-items: end;
+}
+
+.share-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+.share-url {
+  margin-top: 0.5rem;
+  color: var(--text);
+  word-break: break-all;
+}
+
 .score-label {
   color: var(--muted);
   font-size: 0.9rem;
@@ -332,11 +366,21 @@ select:focus {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.lead-form {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.lead-form .primary-button {
+  width: 100%;
+}
+
 .category-card,
 .issue-card,
 .page-card,
 .ai-block,
-.crawl-card {
+.crawl-card,
+.evidence-card,
+.lighthouse-run {
   padding: 1rem;
   border-radius: 1.1rem;
   background: var(--panel-strong);
@@ -434,6 +478,51 @@ select:focus {
   color: #d5fff0;
 }
 
+.evidence-grid,
+.lighthouse-grid,
+.image-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.evidence-grid,
+.lighthouse-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.image-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 1rem;
+}
+
+.audit-image {
+  width: 100%;
+  border-radius: 1rem;
+  border: 1px solid rgba(157, 182, 187, 0.14);
+  display: block;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.metric-tile {
+  padding: 0.85rem;
+  border-radius: 0.9rem;
+  background: rgba(4, 12, 17, 0.6);
+  border: 1px solid rgba(157, 182, 187, 0.11);
+}
+
+.metric-tile strong {
+  display: block;
+  margin-top: 0.35rem;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 1.15rem;
+}
+
 .crawl-label {
   color: var(--muted);
   font-size: 0.82rem;
@@ -455,11 +544,22 @@ select:focus {
   .summary-grid,
   .category-grid,
   .issue-layout,
-  .pages-grid {
+  .pages-grid,
+  .share-grid,
+  .lead-form,
+  .evidence-grid,
+  .lighthouse-grid,
+  .image-grid,
+  .metric-grid,
+  .crawl-grid {
     grid-template-columns: 1fr;
   }
 
   .hero {
     padding: 1.4rem;
+  }
+
+  .share-actions {
+    justify-content: stretch;
   }
 }

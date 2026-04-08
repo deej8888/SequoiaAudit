@@ -54,7 +54,12 @@
 
           <label class="toggle-field">
             <input id="renderJavascript" name="renderJavascript" type="checkbox" />
-            <span>Render JavaScript with Playwright</span>
+            <span>Deep browser audit with Playwright</span>
+          </label>
+
+          <label class="toggle-field">
+            <input id="runLighthouse" name="runLighthouse" type="checkbox" checked />
+            <span>Run Lighthouse on desktop and mobile</span>
           </label>
 
           <button id="submit-button" class="primary-button" type="submit">Run audit</button>
@@ -99,6 +104,23 @@
       </section>
 
       <section id="results" class="results hidden">
+        <section class="card share-card">
+          <div class="section-head">
+            <h2>Saved report</h2>
+          </div>
+          <div class="share-grid">
+            <div>
+              <div class="score-label">Report URL</div>
+              <div id="share-url" class="share-url"></div>
+            </div>
+            <div class="share-actions">
+              <button id="copy-share-link" class="secondary-button" type="button">Copy link</button>
+              <a id="download-json" class="secondary-button" href="#" target="_blank" rel="noreferrer">Open JSON</a>
+              <a id="download-pdf" class="secondary-button" href="#" target="_blank" rel="noreferrer">Download PDF</a>
+            </div>
+          </div>
+        </section>
+
         <div class="summary-grid">
           <article class="card score-card">
             <div class="score-label">Overall score</div>
@@ -130,6 +152,20 @@
           </div>
           <div id="crawl-diagnostics" class="crawl-grid"></div>
           <div id="crawl-notes" class="stack compact-stack"></div>
+        </section>
+
+        <section id="browser-evidence-card" class="card hidden">
+          <div class="section-head">
+            <h2>Browser evidence</h2>
+          </div>
+          <div id="browser-evidence"></div>
+        </section>
+
+        <section id="lighthouse-card" class="card hidden">
+          <div class="section-head">
+            <h2>Lighthouse</h2>
+          </div>
+          <div id="lighthouse-evidence"></div>
         </section>
 
         <section id="ai-summary-card" class="card hidden">
@@ -168,6 +204,29 @@
             <h2>Skipped pages</h2>
           </div>
           <div id="skipped-pages" class="stack"></div>
+        </section>
+
+        <section id="lead-card" class="card">
+          <div class="section-head">
+            <h2>Claim this report</h2>
+            <span class="section-note">Store the lead and keep the audit tied to a real prospect.</span>
+          </div>
+          <form id="lead-form" class="lead-form">
+            <label class="field">
+              <span>Name</span>
+              <input id="lead-name" type="text" placeholder="Jane Smith" />
+            </label>
+            <label class="field">
+              <span>Email</span>
+              <input id="lead-email" type="email" placeholder="jane@company.com" required />
+            </label>
+            <label class="field">
+              <span>Company</span>
+              <input id="lead-company" type="text" placeholder="Acme Co." />
+            </label>
+            <button id="lead-submit" class="primary-button" type="submit">Save lead</button>
+          </form>
+          <div id="lead-status" class="metric-note"></div>
         </section>
       </section>
     </main>

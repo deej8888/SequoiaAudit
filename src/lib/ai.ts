@@ -33,6 +33,48 @@ export async function maybeGenerateAiSummary(report: SiteAuditReport): Promise<A
       evidence: issue.evidence.slice(0, 3),
     })),
     wins: report.wins.slice(0, 5),
+    crawlDiagnostics: {
+      renderMode: report.crawlDiagnostics.renderMode,
+      usedSitemapFallback: report.crawlDiagnostics.usedSitemapFallback,
+      discoveredFromHtml: report.crawlDiagnostics.discoveredFromHtml,
+      discoveredFromSitemap: report.crawlDiagnostics.discoveredFromSitemap,
+      notes: report.crawlDiagnostics.notes.slice(0, 5),
+    },
+    browserEvidence: report.browserEvidence
+      ? {
+          status: report.browserEvidence.status,
+          screenshots: report.browserEvidence.screenshots.map((shot) => ({
+            label: shot.label,
+            viewport: shot.viewport,
+          })),
+          renderedInternalLinkCount: report.browserEvidence.renderedInternalLinks.length,
+          consoleErrors: report.browserEvidence.consoleErrors.slice(0, 5),
+          failedRequests: report.browserEvidence.failedRequests.slice(0, 5),
+          httpErrors: report.browserEvidence.httpErrors.slice(0, 5),
+          brokenImageUrls: report.browserEvidence.brokenImageUrls.slice(0, 5),
+          notes: report.browserEvidence.notes.slice(0, 5),
+        }
+      : undefined,
+    lighthouse: report.lighthouse
+      ? {
+          status: report.lighthouse.status,
+          notes: report.lighthouse.notes.slice(0, 5),
+          mobile: report.lighthouse.mobile
+            ? {
+                categoryScores: report.lighthouse.mobile.categoryScores,
+                metrics: report.lighthouse.mobile.metrics.slice(0, 6),
+                opportunities: report.lighthouse.mobile.opportunities.slice(0, 5),
+              }
+            : undefined,
+          desktop: report.lighthouse.desktop
+            ? {
+                categoryScores: report.lighthouse.desktop.categoryScores,
+                metrics: report.lighthouse.desktop.metrics.slice(0, 6),
+                opportunities: report.lighthouse.desktop.opportunities.slice(0, 5),
+              }
+            : undefined,
+        }
+      : undefined,
     homepage: report.pages[0]
       ? {
           title: report.pages[0].title,

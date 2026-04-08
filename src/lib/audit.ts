@@ -2,14 +2,19 @@ import { lookup } from "node:dns/promises";
 import { load } from "cheerio";
 import { z } from "zod";
 import { maybeGenerateAiSummary } from "./ai.js";
+import { captureBrowserEvidence } from "./browser-evidence.js";
+import { compactBrowserErrorMessage, getPlaywrightUnavailableReason, getSharedPlaywrightBrowser } from "./browser-runtime.js";
+import { runLighthouseEvidence } from "./lighthouse.js";
+import { buildReportLinks, createReportId } from "./report-store.js";
 import { buildCategoryScores, buildOverallScore, sortIssues } from "./scoring.js";
 import type {
   AuditIssue,
+  BrowserEvidence,
   CrawlDiagnostics,
+  LighthouseEvidence,
   PageAudit,
   ResourceCheck,
   Severity,
-  SkippedPage,
   SiteAuditReport,
   SiteSignals,
 } from "./types.js";
@@ -39,11 +44,14 @@ const auditInputSchema = z.object({
   url: z.string().min(3),
   maxPages: z.number().int().min(1).max(10).optional(),
   renderJavascript: z.boolean().optional(),
+  runLighthouse: z.boolean().optional(),
 });
 
 interface AuditOptions {
   maxPages?: number;
   renderJavascript?: boolean;
+  runLighthouse?: boolean;
+  reportId?: string;
 }
 
 interface FetchDocumentResult {
@@ -171,41 +179,6 @@ function buildHeaders(accept: string): HeadersInit {
   };
 }
 
-let playwrightBrowserPromise: Promise<any> | null = null;
-let playwrightUnavailableReason: string | null = null;
-
-function compactErrorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  const firstLine = message.split("\n").map((line) => line.trim()).find(Boolean) ?? "Unknown error.";
-
-  if (message.includes("Executable doesn't exist")) {
-    return `${firstLine} Run "npx playwright install chromium" to enable rendered crawling.`;
-  }
-
-  return firstLine;
-}
-
-async function getPlaywrightBrowser(): Promise<any> {
-  if (playwrightUnavailableReason) {
-    throw new Error(playwrightUnavailableReason);
-  }
-
-  if (!playwrightBrowserPromise) {
-    playwrightBrowserPromise = (async () => {
-      try {
-        const { chromium } = await import("playwright");
-        return chromium.launch({ headless: true });
-      } catch (error) {
-        playwrightUnavailableReason = compactErrorMessage(error);
-        playwrightBrowserPromise = null;
-        throw new Error(playwrightUnavailableReason);
-      }
-    })();
-  }
-
-  return playwrightBrowserPromise;
-}
-
 async function fetchOptionalTextResource(targetUrl: URL, accept: string): Promise<FetchDocumentResult | undefined> {
   try {
     return await fetchTextDocument(targetUrl, accept);
@@ -260,7 +233,7 @@ async function fetchTextDocument(targetUrl: URL, accept: string): Promise<FetchD
 async function fetchRenderedDocument(targetUrl: URL): Promise<FetchDocumentResult> {
   await assertSafeTarget(targetUrl);
 
-  const browser = await getPlaywrightBrowser();
+  const browser = await getSharedPlaywrightBrowser();
   const context = await browser.newContext({
     ignoreHTTPSErrors: process.env.ALLOW_INSECURE_TLS === "true",
   });
@@ -446,10 +419,11 @@ async function auditPage(
       crawlDiagnostics.renderMode = "playwright";
     } catch (error) {
       crawlDiagnostics.renderMode = "playwright-fallback";
-      const compactReason = compactErrorMessage(error);
+      const compactReason = compactBrowserErrorMessage(error);
+      const unavailableReason = getPlaywrightUnavailableReason();
       const note =
-        playwrightUnavailableReason || compactReason.includes('Run "npx playwright install chromium"')
-          ? `Playwright rendering is unavailable. Falling back to raw HTML fetch. ${playwrightUnavailableReason ?? compactReason}`
+        unavailableReason || compactReason.includes('Run "npx playwright install chromium"')
+          ? `Playwright rendering is unavailable. Falling back to raw HTML fetch. ${unavailableReason ?? compactReason}`
           : `Playwright rendering failed for ${targetUrl.toString()}. Falling back to raw HTML fetch. ${compactReason}`.trim();
       if (!crawlDiagnostics.notes.includes(note)) {
         crawlDiagnostics.notes.push(note);
@@ -1088,9 +1062,12 @@ export async function auditSite(rawUrl: string, options: AuditOptions = {}): Pro
     url: rawUrl,
     maxPages: options.maxPages,
     renderJavascript: options.renderJavascript,
+    runLighthouse: options.runLighthouse,
   });
   const maxPages = input.maxPages ?? Number(process.env.DEFAULT_MAX_PAGES ?? 4);
   const renderJavascript = input.renderJavascript ?? false;
+  const runLighthouse = input.runLighthouse ?? true;
+  const reportId = options.reportId ?? createReportId();
   const requestedUrl = normalizePublicUrl(input.url);
   const crawlDiagnostics: CrawlDiagnostics = {
     requestedMaxPages: maxPages,
@@ -1105,6 +1082,7 @@ export async function auditSite(rawUrl: string, options: AuditOptions = {}): Pro
   const homepageResult = await auditPage(requestedUrl, requestedUrl.hostname, renderJavascript, crawlDiagnostics);
   const canonicalHostname = new URL(homepageResult.page.url).hostname;
   const siteOrigin = new URL(homepageResult.page.url).origin;
+  const browserEvidence = await captureBrowserEvidence(siteOrigin, reportId);
   const visited = new Set<string>([normalizeForCrawl(homepageResult.page.url)]);
   const queued = new Set<string>();
   const queue: QueueItem[] = [];
@@ -1136,6 +1114,15 @@ export async function auditSite(rawUrl: string, options: AuditOptions = {}): Pro
     const normalized = normalizeForCrawl(link);
     htmlDiscovered.add(normalized);
     enqueue(normalized, "html");
+  }
+
+  if (browserEvidence.status === "ok" && browserEvidence.renderedInternalLinks.length > 0) {
+    for (const link of browserEvidence.renderedInternalLinks) {
+      enqueue(link, "html");
+    }
+    crawlDiagnostics.notes.push(
+      `Browser rendering found ${browserEvidence.renderedInternalLinks.length} same-site links after JavaScript execution.`,
+    );
   }
 
   if (htmlDiscovered.size === 0) {
@@ -1227,8 +1214,15 @@ export async function auditSite(rawUrl: string, options: AuditOptions = {}): Pro
   const categoryScores = buildCategoryScores(issues);
   const overallScore = buildOverallScore(categoryScores);
   const wins = buildWins(pages, siteSignals);
+  const lighthouseEvidence = runLighthouse ? await runLighthouseEvidence(siteOrigin, reportId) : undefined;
+
+  if (browserEvidence.status !== "ok") {
+    crawlDiagnostics.notes.push(...browserEvidence.notes.filter((note) => !crawlDiagnostics.notes.includes(note)));
+  }
 
   const report: SiteAuditReport = {
+    reportId,
+    links: buildReportLinks(reportId),
     siteUrl: siteOrigin,
     auditedAt: new Date().toISOString(),
     pageCount: pages.length,
@@ -1239,6 +1233,8 @@ export async function auditSite(rawUrl: string, options: AuditOptions = {}): Pro
     pages,
     siteSignals,
     crawlDiagnostics,
+    browserEvidence,
+    lighthouse: lighthouseEvidence,
   };
 
   const aiSummary = await maybeGenerateAiSummary(report);

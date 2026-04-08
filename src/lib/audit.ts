@@ -5,9 +5,11 @@ import { maybeGenerateAiSummary } from "./ai.js";
 import { buildCategoryScores, buildOverallScore, sortIssues } from "./scoring.js";
 import type {
   AuditIssue,
+  CrawlDiagnostics,
   PageAudit,
   ResourceCheck,
   Severity,
+  SkippedPage,
   SiteAuditReport,
   SiteSignals,
 } from "./types.js";
@@ -29,14 +31,19 @@ const trustKeywords = [
   "trusted by",
   "guarantee",
 ];
+const assetExtensionPattern =
+  /\.(?:avif|bmp|css|csv|docx?|eot|gif|gz|ico|jpeg|jpg|js|json|map|mjs|mov|mp[34]|pdf|png|rar|svg|tar|txt|web[mp]|woff2?|xml|zip)$/i;
+const sitemapLocPattern = /<loc>(.*?)<\/loc>/gi;
 
 const auditInputSchema = z.object({
   url: z.string().min(3),
   maxPages: z.number().int().min(1).max(10).optional(),
+  renderJavascript: z.boolean().optional(),
 });
 
 interface AuditOptions {
   maxPages?: number;
+  renderJavascript?: boolean;
 }
 
 interface FetchDocumentResult {
@@ -50,6 +57,16 @@ interface FetchDocumentResult {
 interface PageAuditResult {
   page: PageAudit;
   discoveredLinks: string[];
+}
+
+interface QueueItem {
+  url: string;
+  source: "html" | "sitemap";
+}
+
+interface SitemapDiscoveryResult {
+  resourceCheck: ResourceCheck;
+  pageUrls: string[];
 }
 
 function normalizeWhitespace(value: string): string {
@@ -70,6 +87,27 @@ function normalizeForCrawl(input: string): string {
     url.pathname = url.pathname.slice(0, -1);
   }
   return url.toString();
+}
+
+function normalizeComparableHostname(hostname: string): string {
+  return hostname.toLowerCase().replace(/^www\./, "");
+}
+
+function isSameSiteUrl(candidate: URL, siteHostname: string): boolean {
+  return normalizeComparableHostname(candidate.hostname) === normalizeComparableHostname(siteHostname);
+}
+
+function isLikelyHtmlUrl(candidate: URL): boolean {
+  return !assetExtensionPattern.test(candidate.pathname);
+}
+
+function decodeXmlEntities(value: string): string {
+  return value
+    .replaceAll("&amp;", "&")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&quot;", '"')
+    .replaceAll("&#39;", "'");
 }
 
 function isPrivateHostname(hostname: string): boolean {
@@ -133,6 +171,27 @@ function buildHeaders(accept: string): HeadersInit {
   };
 }
 
+let playwrightBrowserPromise: Promise<any> | null = null;
+
+async function getPlaywrightBrowser(): Promise<any> {
+  if (!playwrightBrowserPromise) {
+    playwrightBrowserPromise = (async () => {
+      const { chromium } = await import("playwright");
+      return chromium.launch({ headless: true });
+    })();
+  }
+
+  return playwrightBrowserPromise;
+}
+
+async function fetchOptionalTextResource(targetUrl: URL, accept: string): Promise<FetchDocumentResult | undefined> {
+  try {
+    return await fetchTextDocument(targetUrl, accept);
+  } catch {
+    return undefined;
+  }
+}
+
 async function fetchTextDocument(targetUrl: URL, accept: string): Promise<FetchDocumentResult> {
   if (process.env.ALLOW_INSECURE_TLS === "true") {
     process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
@@ -174,6 +233,38 @@ async function fetchTextDocument(targetUrl: URL, accept: string): Promise<FetchD
   }
 
   throw new Error(`Too many redirects while fetching ${targetUrl.toString()}.`);
+}
+
+async function fetchRenderedDocument(targetUrl: URL): Promise<FetchDocumentResult> {
+  await assertSafeTarget(targetUrl);
+
+  const browser = await getPlaywrightBrowser();
+  const context = await browser.newContext({
+    ignoreHTTPSErrors: process.env.ALLOW_INSECURE_TLS === "true",
+  });
+  const page = await context.newPage();
+
+  try {
+    const startedAt = Date.now();
+    const response = await page.goto(targetUrl.toString(), {
+      waitUntil: "domcontentloaded",
+      timeout: 15000,
+    });
+    await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => undefined);
+    const finalUrl = new URL(page.url());
+    await assertSafeTarget(finalUrl);
+
+    return {
+      body: await page.content(),
+      finalUrl,
+      responseTimeMs: Date.now() - startedAt,
+      statusCode: response?.status() ?? 200,
+      contentType: response?.headers()["content-type"] ?? "text/html",
+    };
+  } finally {
+    await page.close().catch(() => undefined);
+    await context.close().catch(() => undefined);
+  }
 }
 
 function getHeadingOrderIssues(headings: string[]): number {
@@ -226,8 +317,121 @@ function createIssue(
   };
 }
 
-async function auditPage(targetUrl: URL, siteHostname: string): Promise<PageAuditResult> {
-  const fetched = await fetchTextDocument(targetUrl, "text/html,application/xhtml+xml");
+function extractSitemapLocs(xml: string): string[] {
+  return [...xml.matchAll(sitemapLocPattern)]
+    .map((match) => decodeXmlEntities(normalizeWhitespace(match[1] ?? "")))
+    .filter(Boolean);
+}
+
+function extractRobotsSitemapUrls(robotsBody: string, siteOrigin: string): string[] {
+  return robotsBody
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => /^sitemap:/i.test(line))
+    .map((line) => line.replace(/^sitemap:\s*/i, "").trim())
+    .map((value) => {
+      try {
+        return new URL(value, siteOrigin).toString();
+      } catch {
+        return "";
+      }
+    })
+    .filter(Boolean);
+}
+
+async function discoverSitemapUrls(siteOrigin: string, siteHostname: string, robotsBody?: string): Promise<SitemapDiscoveryResult> {
+  const candidateQueue = [
+    new URL("/sitemap.xml", siteOrigin).toString(),
+    ...extractRobotsSitemapUrls(robotsBody ?? "", siteOrigin),
+  ];
+  const visitedSitemaps = new Set<string>();
+  const pageUrls = new Set<string>();
+  let firstSuccessfulSitemap: FetchDocumentResult | undefined;
+
+  while (candidateQueue.length > 0 && visitedSitemaps.size < 10) {
+    const next = candidateQueue.shift();
+    if (!next) {
+      continue;
+    }
+
+    const normalized = normalizeForCrawl(next);
+    if (visitedSitemaps.has(normalized)) {
+      continue;
+    }
+    visitedSitemaps.add(normalized);
+
+    const fetched = await fetchOptionalTextResource(new URL(normalized), "application/xml,text/xml,*/*");
+    if (!fetched || fetched.statusCode >= 400) {
+      continue;
+    }
+
+    if (!firstSuccessfulSitemap) {
+      firstSuccessfulSitemap = fetched;
+    }
+
+    for (const loc of extractSitemapLocs(fetched.body)) {
+      try {
+        const parsed = new URL(loc, fetched.finalUrl);
+        if (parsed.pathname.toLowerCase().endsWith(".xml")) {
+          const nested = normalizeForCrawl(parsed.toString());
+          if (!visitedSitemaps.has(nested)) {
+            candidateQueue.push(nested);
+          }
+          continue;
+        }
+
+        if (isSameSiteUrl(parsed, siteHostname) && isLikelyHtmlUrl(parsed)) {
+          pageUrls.add(normalizeForCrawl(parsed.toString()));
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  if (firstSuccessfulSitemap) {
+    return {
+      resourceCheck: {
+        url: firstSuccessfulSitemap.finalUrl.toString(),
+        exists: true,
+        detail: `Found with status ${firstSuccessfulSitemap.statusCode}.`,
+      },
+      pageUrls: [...pageUrls],
+    };
+  }
+
+  return {
+    resourceCheck: {
+      url: new URL("/sitemap.xml", siteOrigin).toString(),
+      exists: false,
+      detail: "No usable sitemap was discovered.",
+    },
+    pageUrls: [],
+  };
+}
+
+async function auditPage(
+  targetUrl: URL,
+  siteHostname: string,
+  renderJavascript: boolean,
+  crawlDiagnostics: CrawlDiagnostics,
+): Promise<PageAuditResult> {
+  let fetched: FetchDocumentResult;
+
+  if (renderJavascript) {
+    try {
+      fetched = await fetchRenderedDocument(targetUrl);
+      crawlDiagnostics.renderMode = "playwright";
+    } catch (error) {
+      crawlDiagnostics.renderMode = "playwright-fallback";
+      crawlDiagnostics.notes.push(
+        `Playwright rendering failed for ${targetUrl.toString()}. Falling back to raw HTML fetch. ${error instanceof Error ? error.message : ""}`.trim(),
+      );
+      fetched = await fetchTextDocument(targetUrl, "text/html,application/xhtml+xml");
+    }
+  } else {
+    fetched = await fetchTextDocument(targetUrl, "text/html,application/xhtml+xml");
+  }
 
   if (!looksLikeHtml(fetched.contentType)) {
     throw new Error(`Expected HTML at ${targetUrl.toString()}, received ${fetched.contentType || "unknown content type"}.`);
@@ -253,10 +457,9 @@ async function auditPage(targetUrl: URL, siteHostname: string): Promise<PageAudi
       }
 
       const normalized = normalizeForCrawl(parsed.toString());
-      const extension = normalized.split("/").pop()?.split("?")[0] ?? "";
 
-      if (parsed.hostname === siteHostname) {
-        if (!extension.includes(".") || /\.(html?|php|asp|aspx)$/i.test(extension)) {
+      if (isSameSiteUrl(parsed, siteHostname)) {
+        if (isLikelyHtmlUrl(parsed)) {
           internalLinks.add(normalized);
         }
       } else {
@@ -857,15 +1060,95 @@ export async function auditSite(rawUrl: string, options: AuditOptions = {}): Pro
   const input = auditInputSchema.parse({
     url: rawUrl,
     maxPages: options.maxPages,
+    renderJavascript: options.renderJavascript,
   });
   const maxPages = input.maxPages ?? Number(process.env.DEFAULT_MAX_PAGES ?? 4);
+  const renderJavascript = input.renderJavascript ?? false;
   const requestedUrl = normalizePublicUrl(input.url);
+  const crawlDiagnostics: CrawlDiagnostics = {
+    requestedMaxPages: maxPages,
+    renderMode: renderJavascript ? "playwright-fallback" : "http",
+    usedSitemapFallback: false,
+    discoveredFromHtml: 0,
+    discoveredFromSitemap: 0,
+    notes: [],
+    skippedPages: [],
+  };
 
-  const homepageResult = await auditPage(requestedUrl, requestedUrl.hostname);
+  const homepageResult = await auditPage(requestedUrl, requestedUrl.hostname, renderJavascript, crawlDiagnostics);
   const canonicalHostname = new URL(homepageResult.page.url).hostname;
+  const siteOrigin = new URL(homepageResult.page.url).origin;
   const visited = new Set<string>([normalizeForCrawl(homepageResult.page.url)]);
-  const queue = homepageResult.discoveredLinks.filter((link) => new URL(link).hostname === canonicalHostname);
+  const queued = new Set<string>();
+  const queue: QueueItem[] = [];
   const pages: PageAudit[] = [homepageResult.page];
+  const htmlDiscovered = new Set<string>();
+  const sitemapDiscovered = new Set<string>();
+
+  const enqueue = (url: string, source: "html" | "sitemap") => {
+    const normalized = normalizeForCrawl(url);
+
+    if (visited.has(normalized) || queued.has(normalized)) {
+      return;
+    }
+
+    try {
+      const parsed = new URL(normalized);
+      if (!isSameSiteUrl(parsed, canonicalHostname) || !isLikelyHtmlUrl(parsed)) {
+        return;
+      }
+    } catch {
+      return;
+    }
+
+    queue.push({ url: normalized, source });
+    queued.add(normalized);
+  };
+
+  for (const link of homepageResult.discoveredLinks) {
+    const normalized = normalizeForCrawl(link);
+    htmlDiscovered.add(normalized);
+    enqueue(normalized, "html");
+  }
+
+  if (htmlDiscovered.size === 0) {
+    crawlDiagnostics.notes.push("No crawlable internal links were found in the initial HTML response.");
+  }
+
+  const robotsFetched = await fetchOptionalTextResource(new URL("/robots.txt", siteOrigin), "text/plain,*/*");
+  const robotsTxt: ResourceCheck = robotsFetched
+    ? {
+        url: robotsFetched.finalUrl.toString(),
+        exists: robotsFetched.statusCode >= 200 && robotsFetched.statusCode < 400 && robotsFetched.body.toLowerCase().includes("user-agent"),
+        detail:
+          robotsFetched.statusCode >= 200 && robotsFetched.statusCode < 400
+            ? `Found with status ${robotsFetched.statusCode}.`
+            : `Returned status ${robotsFetched.statusCode}.`,
+      }
+    : {
+        url: new URL("/robots.txt", siteOrigin).toString(),
+        exists: false,
+        detail: "Unable to fetch robots.txt.",
+      };
+
+  const sitemapDiscovery = await discoverSitemapUrls(siteOrigin, canonicalHostname, robotsFetched?.body);
+  for (const url of sitemapDiscovery.pageUrls) {
+    const normalized = normalizeForCrawl(url);
+    sitemapDiscovered.add(normalized);
+    enqueue(normalized, "sitemap");
+  }
+
+  crawlDiagnostics.discoveredFromHtml = htmlDiscovered.size;
+  crawlDiagnostics.discoveredFromSitemap = sitemapDiscovered.size;
+  crawlDiagnostics.usedSitemapFallback = htmlDiscovered.size === 0 && sitemapDiscovered.size > 0;
+
+  if (crawlDiagnostics.usedSitemapFallback) {
+    crawlDiagnostics.notes.push("Used sitemap discovery because the initial page did not expose crawlable internal links.");
+  }
+
+  if (sitemapDiscovered.size > 0) {
+    crawlDiagnostics.notes.push(`Discovered ${sitemapDiscovered.size} same-site URLs from sitemap data.`);
+  }
 
   while (queue.length > 0 && pages.length < maxPages) {
     const next = queue.shift();
@@ -873,31 +1156,45 @@ export async function auditSite(rawUrl: string, options: AuditOptions = {}): Pro
       continue;
     }
 
-    const normalized = normalizeForCrawl(next);
+    const normalized = normalizeForCrawl(next.url);
+    queued.delete(normalized);
     if (visited.has(normalized)) {
       continue;
     }
 
     try {
-      const pageResult = await auditPage(new URL(normalized), canonicalHostname);
+      const pageResult = await auditPage(new URL(normalized), canonicalHostname, renderJavascript, crawlDiagnostics);
       pages.push(pageResult.page);
       visited.add(normalized);
 
       for (const link of pageResult.discoveredLinks) {
         const discovered = normalizeForCrawl(link);
-        if (!visited.has(discovered) && !queue.includes(discovered) && new URL(discovered).hostname === canonicalHostname) {
-          queue.push(discovered);
-        }
+        htmlDiscovered.add(discovered);
+        enqueue(discovered, "html");
       }
     } catch (error) {
       console.error(`Skipping page ${normalized}:`, error);
+      crawlDiagnostics.skippedPages.push({
+        url: normalized,
+        reason: error instanceof Error ? error.message : "Unknown crawl error.",
+        source: next.source,
+      });
       visited.add(normalized);
     }
   }
 
-  const siteOrigin = new URL(pages[0].url).origin;
-  const robotsTxt = await auditSiteResource(new URL("/robots.txt", siteOrigin), "text/plain", "user-agent");
-  const sitemapXml = await auditSiteResource(new URL("/sitemap.xml", siteOrigin), "application/xml,text/xml,*/*");
+  crawlDiagnostics.discoveredFromHtml = htmlDiscovered.size;
+  crawlDiagnostics.discoveredFromSitemap = sitemapDiscovered.size;
+
+  if (pages.length === 1 && maxPages > 1 && queue.length === 0 && crawlDiagnostics.skippedPages.length === 0) {
+    crawlDiagnostics.notes.push("The crawl ended at the homepage because no additional same-site HTML pages were discovered.");
+  }
+
+  if (renderJavascript && crawlDiagnostics.renderMode === "playwright-fallback") {
+    crawlDiagnostics.notes.push("JavaScript rendering was requested, but the crawl used raw HTML for at least part of the run.");
+  }
+
+  const sitemapXml = sitemapDiscovery.resourceCheck;
   const siteSignals = buildSiteSignals(pages, siteOrigin, robotsTxt, sitemapXml);
   const issues = buildIssues(pages, siteSignals);
   const categoryScores = buildCategoryScores(issues);
@@ -914,6 +1211,7 @@ export async function auditSite(rawUrl: string, options: AuditOptions = {}): Pro
     wins,
     pages,
     siteSignals,
+    crawlDiagnostics,
   };
 
   const aiSummary = await maybeGenerateAiSummary(report);

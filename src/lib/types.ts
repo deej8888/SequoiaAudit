@@ -34,6 +34,22 @@ export interface ResourceCheck {
   detail: string;
 }
 
+export interface SkippedPage {
+  url: string;
+  reason: string;
+  source: "html" | "sitemap";
+}
+
+export interface CrawlDiagnostics {
+  requestedMaxPages: number;
+  renderMode: "http" | "playwright" | "playwright-fallback";
+  usedSitemapFallback: boolean;
+  discoveredFromHtml: number;
+  discoveredFromSitemap: number;
+  notes: string[];
+  skippedPages: SkippedPage[];
+}
+
 export interface PageAudit {
   url: string;
   statusCode: number;
@@ -99,5 +115,6 @@ export interface SiteAuditReport {
   wins: string[];
   pages: PageAudit[];
   siteSignals: SiteSignals;
+  crawlDiagnostics: CrawlDiagnostics;
   aiSummary?: AiSummary;
 }

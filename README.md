@@ -37,9 +37,21 @@ Open `http://localhost:3000`.
 ```bash
 npm run audit -- https://example.com
 npm run audit -- https://example.com 6
+npm run audit -- https://example.com 6 --render
 ```
 
 The second argument is the max page count to crawl.
+Use `--render` to enable Playwright-backed JavaScript rendering for SPA-style sites.
+
+## Playwright setup
+
+If you want rendered crawling, install a browser once:
+
+```bash
+npx playwright install chromium
+```
+
+If Chromium is missing, the app will fall back to raw HTML crawl mode and explain that in the report.
 
 ## Environment variables
 

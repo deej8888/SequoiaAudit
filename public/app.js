@@ -6,6 +6,7 @@ const errorPanel = document.querySelector("#error-panel");
 const errorText = document.querySelector("#error-text");
 const results = document.querySelector("#results");
 const aiSummaryCard = document.querySelector("#ai-summary-card");
+const skippedPagesCard = document.querySelector("#skipped-pages-card");
 
 function escapeHtml(value) {
   return String(value)
@@ -164,6 +165,59 @@ function renderAiSummary(aiSummary) {
   `;
 }
 
+function renderCrawlDiagnostics(crawlDiagnostics) {
+  const container = document.querySelector("#crawl-diagnostics");
+  const notesContainer = document.querySelector("#crawl-notes");
+
+  container.innerHTML = `
+    <article class="crawl-card">
+      <div class="crawl-label">Requested pages</div>
+      <div class="crawl-value">${escapeHtml(crawlDiagnostics.requestedMaxPages)}</div>
+    </article>
+    <article class="crawl-card">
+      <div class="crawl-label">Render mode</div>
+      <div class="crawl-value">${escapeHtml(crawlDiagnostics.renderMode)}</div>
+    </article>
+    <article class="crawl-card">
+      <div class="crawl-label">Found in HTML</div>
+      <div class="crawl-value">${escapeHtml(crawlDiagnostics.discoveredFromHtml)}</div>
+    </article>
+    <article class="crawl-card">
+      <div class="crawl-label">Found in sitemap</div>
+      <div class="crawl-value">${escapeHtml(crawlDiagnostics.discoveredFromSitemap)}</div>
+    </article>
+  `;
+
+  notesContainer.innerHTML = crawlDiagnostics.notes.length
+    ? crawlDiagnostics.notes.map((note) => `<div class="issue-card"><p>${escapeHtml(note)}</p></div>`).join("")
+    : `<div class="issue-card"><p>No crawl warnings were reported.</p></div>`;
+}
+
+function renderSkippedPages(skippedPages) {
+  const container = document.querySelector("#skipped-pages");
+
+  if (!skippedPages.length) {
+    skippedPagesCard.classList.add("hidden");
+    container.innerHTML = "";
+    return;
+  }
+
+  skippedPagesCard.classList.remove("hidden");
+  container.innerHTML = skippedPages
+    .map(
+      (item) => `
+        <article class="issue-card">
+          <div class="issue-header">
+            <h3 class="issue-title">${escapeHtml(item.url)}</h3>
+            <span class="badge ${severityClass(item.source === "sitemap" ? "medium" : "low")}">${escapeHtml(item.source)}</span>
+          </div>
+          <p>${escapeHtml(item.reason)}</p>
+        </article>
+      `,
+    )
+    .join("");
+}
+
 function renderReport(report) {
   document.querySelector("#overall-score").textContent = report.overallScore;
   document.querySelector("#overall-site").textContent = report.siteUrl;
@@ -172,9 +226,11 @@ function renderReport(report) {
   document.querySelector("#audit-time").textContent = `Audited ${new Date(report.auditedAt).toLocaleString()}`;
 
   renderCategoryScores(report.categoryScores);
+  renderCrawlDiagnostics(report.crawlDiagnostics);
   renderIssues(report.issues);
   renderWins(report.wins);
   renderPages(report.pages);
+  renderSkippedPages(report.crawlDiagnostics.skippedPages);
   renderAiSummary(report.aiSummary);
 }
 
@@ -183,9 +239,11 @@ form.addEventListener("submit", async (event) => {
 
   const url = document.querySelector("#url").value.trim();
   const maxPages = Number(document.querySelector("#maxPages").value);
+  const renderJavascript = document.querySelector("#renderJavascript").checked;
 
   errorPanel.classList.add("hidden");
   results.classList.add("hidden");
+  skippedPagesCard.classList.add("hidden");
   statusPanel.classList.remove("hidden");
   statusText.textContent = "Running audit...";
   submitButton.disabled = true;
@@ -197,7 +255,7 @@ form.addEventListener("submit", async (event) => {
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ url, maxPages }),
+      body: JSON.stringify({ url, maxPages, renderJavascript }),
     });
 
     const payload = await response.json();

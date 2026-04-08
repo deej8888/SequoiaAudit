@@ -172,12 +172,34 @@ function buildHeaders(accept: string): HeadersInit {
 }
 
 let playwrightBrowserPromise: Promise<any> | null = null;
+let playwrightUnavailableReason: string | null = null;
+
+function compactErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const firstLine = message.split("\n").map((line) => line.trim()).find(Boolean) ?? "Unknown error.";
+
+  if (message.includes("Executable doesn't exist")) {
+    return `${firstLine} Run "npx playwright install chromium" to enable rendered crawling.`;
+  }
+
+  return firstLine;
+}
 
 async function getPlaywrightBrowser(): Promise<any> {
+  if (playwrightUnavailableReason) {
+    throw new Error(playwrightUnavailableReason);
+  }
+
   if (!playwrightBrowserPromise) {
     playwrightBrowserPromise = (async () => {
-      const { chromium } = await import("playwright");
-      return chromium.launch({ headless: true });
+      try {
+        const { chromium } = await import("playwright");
+        return chromium.launch({ headless: true });
+      } catch (error) {
+        playwrightUnavailableReason = compactErrorMessage(error);
+        playwrightBrowserPromise = null;
+        throw new Error(playwrightUnavailableReason);
+      }
     })();
   }
 
@@ -424,9 +446,14 @@ async function auditPage(
       crawlDiagnostics.renderMode = "playwright";
     } catch (error) {
       crawlDiagnostics.renderMode = "playwright-fallback";
-      crawlDiagnostics.notes.push(
-        `Playwright rendering failed for ${targetUrl.toString()}. Falling back to raw HTML fetch. ${error instanceof Error ? error.message : ""}`.trim(),
-      );
+      const compactReason = compactErrorMessage(error);
+      const note =
+        playwrightUnavailableReason || compactReason.includes('Run "npx playwright install chromium"')
+          ? `Playwright rendering is unavailable. Falling back to raw HTML fetch. ${playwrightUnavailableReason ?? compactReason}`
+          : `Playwright rendering failed for ${targetUrl.toString()}. Falling back to raw HTML fetch. ${compactReason}`.trim();
+      if (!crawlDiagnostics.notes.includes(note)) {
+        crawlDiagnostics.notes.push(note);
+      }
       fetched = await fetchTextDocument(targetUrl, "text/html,application/xhtml+xml");
     }
   } else {

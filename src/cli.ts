@@ -1,10 +1,12 @@
 import { auditSite } from "./lib/audit.js";
 
-const url = process.argv[2];
-const maxPagesArg = process.argv[3];
+const args = process.argv.slice(2);
+const url = args[0];
+const maxPagesArg = args.find((arg, index) => index > 0 && /^\d+$/.test(arg));
+const renderJavascript = args.includes("--render");
 
 if (!url) {
-  console.error("Usage: npm run audit -- <url> [maxPages]");
+  console.error("Usage: npm run audit -- <url> [maxPages] [--render]");
   process.exit(1);
 }
 
@@ -13,6 +15,7 @@ const maxPages = maxPagesArg ? Number(maxPagesArg) : undefined;
 try {
   const report = await auditSite(url, {
     maxPages: Number.isFinite(maxPages) ? maxPages : undefined,
+    renderJavascript,
   });
 
   console.log(JSON.stringify(report, null, 2));

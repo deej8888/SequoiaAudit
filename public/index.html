@@ -52,6 +52,11 @@
             </select>
           </label>
 
+          <label class="toggle-field">
+            <input id="renderJavascript" name="renderJavascript" type="checkbox" />
+            <span>Render JavaScript with Playwright</span>
+          </label>
+
           <button id="submit-button" class="primary-button" type="submit">Run audit</button>
         </form>
 
@@ -119,6 +124,14 @@
           <div id="category-grid" class="category-grid"></div>
         </section>
 
+        <section class="card">
+          <div class="section-head">
+            <h2>Crawl diagnostics</h2>
+          </div>
+          <div id="crawl-diagnostics" class="crawl-grid"></div>
+          <div id="crawl-notes" class="stack compact-stack"></div>
+        </section>
+
         <section id="ai-summary-card" class="card hidden">
           <div class="section-head">
             <h2>AI summary</h2>
@@ -148,6 +161,13 @@
             <h2>Pages audited</h2>
           </div>
           <div id="pages-grid" class="pages-grid"></div>
+        </section>
+
+        <section id="skipped-pages-card" class="card hidden">
+          <div class="section-head">
+            <h2>Skipped pages</h2>
+          </div>
+          <div id="skipped-pages" class="stack"></div>
         </section>
       </section>
     </main>

@@ -109,7 +109,7 @@ h3,
 
 .audit-form {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 150px auto;
+  grid-template-columns: minmax(0, 1fr) 150px minmax(240px, 280px) auto;
   gap: 1rem;
   margin-top: 2rem;
 }
@@ -123,6 +123,30 @@ h3,
 .field span {
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+.toggle-field {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  align-self: end;
+  min-height: 58px;
+  border: 1px solid rgba(157, 182, 187, 0.16);
+  border-radius: 1rem;
+  background: rgba(4, 12, 17, 0.78);
+  color: var(--text);
+  padding: 0 1rem;
+}
+
+.toggle-field input {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+}
+
+.toggle-field span {
+  color: var(--muted);
+  font-size: 0.94rem;
 }
 
 input,
@@ -294,7 +318,8 @@ select:focus {
 }
 
 .category-grid,
-.pages-grid {
+.pages-grid,
+.crawl-grid {
   display: grid;
   gap: 1rem;
 }
@@ -303,10 +328,15 @@ select:focus {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.crawl-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .category-card,
 .issue-card,
 .page-card,
-.ai-block {
+.ai-block,
+.crawl-card {
   padding: 1rem;
   border-radius: 1.1rem;
   background: var(--panel-strong);
@@ -322,6 +352,10 @@ select:focus {
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
+}
+
+.compact-stack {
+  margin-top: 1rem;
 }
 
 .issue-header,
@@ -398,6 +432,17 @@ select:focus {
 
 .page-link:hover {
   color: #d5fff0;
+}
+
+.crawl-label {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.crawl-value {
+  margin-top: 0.35rem;
+  font-size: 1.15rem;
+  font-family: "Space Grotesk", sans-serif;
 }
 
 .hidden {

@@ -11,6 +11,7 @@ const publicDir = path.resolve(__dirname, "../public");
 const requestSchema = z.object({
   url: z.string().min(3),
   maxPages: z.number().int().min(1).max(10).optional(),
+  renderJavascript: z.boolean().optional(),
 });
 
 const app = express();
@@ -28,7 +29,10 @@ app.get("/api/health", (_req, res) => {
 app.post("/api/audit", async (req, res) => {
   try {
     const payload = requestSchema.parse(req.body);
-    const report = await auditSite(payload.url, { maxPages: payload.maxPages });
+    const report = await auditSite(payload.url, {
+      maxPages: payload.maxPages,
+      renderJavascript: payload.renderJavascript,
+    });
     res.json(report);
   } catch (error) {
     console.error("Audit request failed:", error);
